@@ -14,8 +14,10 @@ package main
     点击link后查看war3.replays.net上的页面
 
 TODO
+* DONE rep和map要判断是否已经存在
+* DONE 把mustCompile和findstring抽象出来
+* 抽象mustcompile和replaceallstring
 * 启动exe后先启动协程请求replist，然后拉起httpserver，协程拿到replist后就拉起浏览器
-* rep和map要判断是否已经存在
 * 容错性，不要任何错误挂掉
 * 读取replist要在未读完时就时时展示：协程拿到replist后就拉起浏览器
 * 点击replay之后不要打开新页面
@@ -52,7 +54,7 @@ const httpReplayPattern = "/replay"
 
 func main() {
 	http.HandleFunc(httpListPattern, func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("access: %s\n", httpListPattern)
+		log.Println("== list")
 		replist := getReplays()
 
 		// 组装页面内容
@@ -65,16 +67,17 @@ func main() {
                     <td>%s</td>
                     <td>%s</td>
                     <td><a href="%s" target="_blank">link</a></td>
-                    <td><a href="/replay?link=%s" target="_blank">replay</a></td></td>
+                    <td><a href="/replay?link=%s&onlydownload=false" target="#">replay</a></td></td>
+                    <td><a href="/replay?link=%s&onlydownload=true" target="#">download</a></td></td>
                 </tr>
-            `, rep.Date, rep.Race, rep.Player, rep.Map, rep.Link, rep.Link)
+            `, rep.Date, rep.Race, rep.Player, rep.Map, rep.Link, rep.Link, rep.Link)
 		}
 		// 展示
 		fmt.Fprintf(w, `
             <html>
                 <head></head>
                 <body>
-                    <table border="2">
+                    <table border="1">
                       <tr>
                         <th>Date</th>
                         <th>Race</th>
@@ -91,7 +94,7 @@ func main() {
 	})
 
 	http.HandleFunc(httpReplayPattern, func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("access: %s\n", httpReplayPattern)
+		log.Println("== replay")
 		reqUrl, err := url.Parse(r.RequestURI)
 		if err != nil {
 			log.Fatal(err)
@@ -100,9 +103,18 @@ func main() {
 		link := reqUrl.Query().Get("link")
 		log.Printf("link: %s\n", link)
 
-		go getRep(link)
+		onlydownload := reqUrl.Query().Get("onlydownload")
+		log.Printf("onlydownload: %s\n", onlydownload)
+
+		err = getRep(link, onlydownload)
+		var errMsg string
+		if err != nil {
+			errMsg = "ERROR: " + err.Error()
+		} else {
+			errMsg = "SUCCESS"
+		}
 		// TODO
-		fmt.Fprintln(w, "hello")
+		fmt.Fprintf(w, "%s", errMsg)
 	})
 
 	go startBrowser()
@@ -111,72 +123,82 @@ func main() {
 	log.Fatal(http.ListenAndServe(httpAddr, nil))
 }
 
-func getRep(link string) {
+func getRep(link string, onlydownload string) error {
 	resp, err := http.Get(link)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	log.Println("reading repinfo body...")
 	buf, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	log.Println("reading repinfo body ok")
 
 	content := string(buf)
-	// log.Printf("replay:%s\n", content)
-
-	var res string
 
 	// 下载replay
-	replayPathRe := regexp.MustCompile(`<span id="ctl00_Content_labDown" class="download"><a href="(.*)">Download REP</a></span>`)
-	res = replayPathRe.FindString(content)
-	replayPath := replayPathRe.ReplaceAllString(res, "$1")
+	log.Println("====  download replay")
+	replayPath := reFindAndReplaceAll(content,
+		`<span id="ctl00_Content_labDown" class="download"><a href="(.*)">Download REP</a></span>`,
+		"$1")
 	replayPath, err = url.QueryUnescape(replayPath)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	log.Printf("replayPath=%s\n", replayPath)
-	replayNameRe := regexp.MustCompile(`/Download.aspx\?ReplayID=.*&File=/ReplayFile/.*/(.*)`)
-	replayName := replayNameRe.ReplaceAllString(replayPath, "$1")
+	replayName := reReplaceAll(replayPath, `/Download.aspx\?ReplayID=.*&File=/ReplayFile/.*/(.*)`, "$1")
 	log.Printf("replayName=%s\n", replayName)
 
-	respRep, err := http.Get("http://w3g.replays.net" + replayPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer respRep.Body.Close()
+	// 如果replayName不存在，再下载
+	replaySaveAbsPath := war3Path + replaySavePath + replayName
+	_, err = os.Stat(replaySaveAbsPath)
+	if err != nil && !os.IsExist(err) {
+		respRep, err := http.Get("http://w3g.replays.net" + replayPath)
+		if err != nil {
+			return err
+		}
+		defer respRep.Body.Close()
 
-	log.Println("reading rep body...")
-	buf, err = ioutil.ReadAll(respRep.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("reading rep body...")
+		log.Println("reading rep body...")
+		buf, err = ioutil.ReadAll(respRep.Body)
+		if err != nil {
+			return err
+		}
+		log.Println("reading rep body...")
 
-	// 无论是否存在
-	err = ioutil.WriteFile(war3Path+replaySavePath+replayName, buf, os.ModePerm)
-	if err != nil {
-		log.Fatal(err)
+		log.Printf("write replay file: %v\n", replaySaveAbsPath)
+		err = ioutil.WriteFile(replaySaveAbsPath, buf, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	} else {
+		log.Println("replay file already exists")
 	}
 
 	// 下载地图
-	mapPathRe := regexp.MustCompile(`<span id="ctl00_Content_labMapname">([^<]*)</span>`)
-	res = mapPathRe.FindString(content)
-	mapPath := mapPathRe.ReplaceAllString(res, "$1")
+	log.Println("==== download map")
+	mapPath := reFindAndReplaceAll(content, `<span id="ctl00_Content_labMapname">([^<]*)</span>`, "$1")
 	mapPath = strings.Replace(mapPath, "\\", "/", -1)
 	log.Printf("mappath=%s\n", mapPath)
+
+	mapAbsPath := war3Path + mapPath
+	log.Printf("mapAbsPath=%s\n", mapAbsPath)
+
+	// 获取本地地图的大小
+	var localMapSize int64 = 0
+	mapInfo, err := os.Stat(mapAbsPath)
+	if err == nil {
+		localMapSize = mapInfo.Size()
+	}
 
 	ind := strings.LastIndex(mapPath, "/")
 	mapName := mapPath[ind+1:]
 	log.Printf("mapName=%s\n", mapName)
 
-	downPathRe := regexp.MustCompile(`javascript:getreplaymap\(.*,'(.*)','.*'\)`)
-	res = downPathRe.FindString(content)
-	log.Printf("downpath res=%s\n", res)
-	downPath := downPathRe.ReplaceAllString(res, "$1")
+	downPath := reFindAndReplaceAll(content, `javascript:getreplaymap\(.*,'(.*)','.*'\)`, "$1")
 	log.Printf("downPath=%s\n", downPath)
 
 	mapPathAbs := "http://w3g.replays.net/ReplayMap/download/" + downPath + "/" + mapName
@@ -184,34 +206,42 @@ func getRep(link string) {
 
 	respMap, err := http.Get(mapPathAbs)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer respMap.Body.Close()
 
-	log.Println("reading map body...")
-	buf, err = ioutil.ReadAll(respMap.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("reading map body ok")
+	// 如果服务器地图和本地大小不一致，再保存
+	if respMap.ContentLength != localMapSize {
+		log.Printf("map file different: local=%v, remote=%v\n", localMapSize, respMap.ContentLength)
+		buf, err = ioutil.ReadAll(respMap.Body)
+		if err != nil {
+			return err
+		}
+		log.Println("reading map body ok")
 
-	// 无论是否存在
-	mapDir := war3Path + mapPath
-	log.Printf("mapDir=%s\n", mapDir)
-	ind = strings.LastIndex(mapDir, "/")
-	mapDir = mapDir[:ind]
-	log.Printf("mapDir2=%s\n", mapDir)
-	err = os.MkdirAll(mapDir, 0777)
-	if err != nil {
-		log.Fatal(err)
+		// 确认目录已存在
+		ind = strings.LastIndex(mapAbsPath, "/")
+		mapDir := mapAbsPath[:ind]
+		log.Printf("mapDir2=%s\n", mapDir)
+		err = os.MkdirAll(mapDir, 0777)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("write map file: %v\n", mapAbsPath)
+		err = ioutil.WriteFile(mapAbsPath, buf, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	} else {
+		log.Println("map file already exists")
 	}
 
-	err = ioutil.WriteFile(war3Path+mapPath, buf, os.ModePerm)
-	if err != nil {
-		log.Fatal(err)
+	if onlydownload == "false" {
+		startReplay(replayName)
 	}
 
-	startReplay(replayName)
+	return nil
 }
 
 func getReplays() []*repentry {
@@ -235,8 +265,6 @@ func getReplays() []*repentry {
 	// 处理页面内容，保存到replist中
 	replist := make([]*repentry, 0)
 
-	// 取"War3-left fl"和"War3-right fr"之间的内容
-	// const left = `<div class="War3-rep-list">`
 	const left = `<ul class="datarow2">`
 	const right = `<span id="ctl00_Content_labPage" class="cutpage">`
 	var content2 *string
@@ -247,24 +275,12 @@ func getReplays() []*repentry {
 	content2 = &strArr2[0]
 
 	res := *content2
-	// log.Printf("body: %s\n", res)
 
-	raceRe := regexp.MustCompile(`<li class="c_r"><a href=".*">(.*)</a></li>\r\n`)
-	res = raceRe.ReplaceAllString(res, "$1|")
-
-	playerRe := regexp.MustCompile(`<li class="c_p"><a href="(.*)" target="_blank">(.*)</li>\r\n`)
-	res = playerRe.ReplaceAllString(res, "$2|$1|")
-
-	mapRe := regexp.MustCompile(`<li class="c_m">(.*)</li>\r\n`)
-	res = mapRe.ReplaceAllString(res, "$1|")
-
-	dateRe := regexp.MustCompile(`<li class="c_t">(.*)</li>\r\n`)
-	res = dateRe.ReplaceAllString(res, "$1\n")
-
-	otherRe := regexp.MustCompile(`<(.*)>\r\n`)
-	res = otherRe.ReplaceAllString(res, "")
-
-	// log.Println(res)
+	res = reReplaceAll(res, `<li class="c_r"><a href=".*">(.*)</a></li>\r\n`, "$1|")
+	res = reReplaceAll(res, `<li class="c_p"><a href="(.*)" target="_blank">(.*)</li>\r\n`, "$2|$1|")
+	res = reReplaceAll(res, `<li class="c_m">(.*)</li>\r\n`, "$1|")
+	res = reReplaceAll(res, `<li class="c_t">(.*)</li>\r\n`, "$1\n")
+	res = reReplaceAll(res, `<(.*)>\r\n`, "")
 
 	strArr = strings.Split(res, "\n")
 
@@ -280,7 +296,6 @@ func getReplays() []*repentry {
 			Link:   resArr[2],
 			Date:   resArr[4],
 		}
-		// log.Printf("Race=%s,Player=%s,Map=%s,Link=%s,Date=%s\n", resArr[0], resArr[1], resArr[3], resArr[2], resArr[4])
 		replist = append(replist, &rep1)
 	}
 
@@ -303,4 +318,17 @@ func startReplay(replayName string) {
 	if err != nil {
 		log.Printf("ERROR: %s\n", err.Error())
 	}
+}
+
+// 在str中取出正则reStr，然后替换成replace
+func reFindAndReplaceAll(str string, reStr string, replace string) string {
+	re := regexp.MustCompile(reStr)
+	res := re.FindString(str)
+	return re.ReplaceAllString(res, replace)
+}
+
+// 直接把str中匹配正则reStr的替换成replace。不先取出。
+func reReplaceAll(str string, reStr string, replace string) string {
+	re := regexp.MustCompile(reStr)
+	return re.ReplaceAllString(str, replace)
 }
