@@ -9,4 +9,4 @@
 
 * 点击replay：会自动下载replay文件和相应的地图，并打开war3，“一键”在线看录像
 * 点击download：只自动下载replay文件和相应的地图，不打开war3
-* 链接到http://w3g.replays.net查看（点击link）
+* 链接到 http://w3g.replays.net 查看（点击link）
