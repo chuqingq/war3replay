@@ -1,28 +1,7 @@
 package main
 
-/*
-项目：在线一键看war3录像
+// 在线一键看war3录像
 
-场景：
-    war3replay.exe可以配置一个json的配置文件，说明：
-        启动的war3目录（默认地图和replay下载到这个目录下）
-    启动可执行程序，自动打开浏览器，看到replay页面，页面中展示最近的replay。
-    展示形式如下：
-        race players map date link replay
-        UD vs HM [妖妖杯]Yumiko vs Xiaokai #2 LastRefuge1.3 11-07
-    点击replay之后自动下载录像和地图到事先指定的目录下，并启动war3播放
-    点击link后查看war3.replays.net上的页面
-
-TODO
-* DONE rep和map要判断是否已经存在
-* DONE 把mustCompile和findstring抽象出来
-* 抽象mustcompile和replaceallstring
-* 启动exe后先启动协程请求replist，然后拉起httpserver，协程拿到replist后就拉起浏览器
-* 容错性，不要任何错误挂掉
-* 读取replist要在未读完时就时时展示：协程拿到replist后就拉起浏览器
-* 点击replay之后不要打开新页面
-
-*/
 import (
 	"fmt"
 	"io/ioutil"
@@ -53,70 +32,62 @@ const httpAddr = "127.0.0.1:28080"
 const httpListPattern = "/list"
 const httpReplayPattern = "/replay"
 
+var response string
+
 func main() {
 	http.HandleFunc(httpListPattern, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("== list")
-		replist := getReplays()
 
-		// 组装页面内容
-		repbody := ""
-		for _, rep := range replist {
-			repbody += fmt.Sprintf(`
+		if response == "" {
+			replist := getReplays()
+
+			// 组装页面内容
+			repbody := ""
+			for _, rep := range replist {
+				repbody += fmt.Sprintf(`
                 <tr>
                     <td>%s</td>
                     <td>%s</td>
                     <td>%s</td>
                     <td>%s</td>
                     <td><a href="%s" target="_blank">link</a></td>
-                    <td><a href="/replay?link=%s&onlydownload=false" target="#">replay</a></td></td>
-                    <td><a href="/replay?link=%s&onlydownload=true" target="#">download</a></td></td>
+                    <td><a href="/list?action=replay&link=%s">replay</a></td></td>
+                    <td><a href="/list?action=download&link=%s">download</a></td></td>
                 </tr>
             `, rep.Date, rep.Race, rep.Player, rep.Map, rep.Link, rep.Link, rep.Link)
-		}
-		// 展示
-		fmt.Fprintf(w, `
-            <html>
-                <head></head>
-                <body>
-                    <table border="1">
-                      <tr>
-                        <th>Date</th>
-                        <th>Race</th>
-                        <th>Player</th>
-                        <th>Map</th>
-                        <th>Link</th>
-                        <th>Replay</th>
-                        <th>Download</th>
-                      </tr>
-                      %s
-                    </table>
-                </body>
-            </html>
-        `, repbody)
-	})
-
-	http.HandleFunc(httpReplayPattern, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("== replay")
-		reqUrl, err := url.Parse(r.RequestURI)
-		if err != nil {
-			log.Fatal(err)
+			}
+			// 展示
+			response = fmt.Sprintf(`
+	            <html>
+	                <head></head>
+	                <body>
+	                    <table border="1">
+	                      <tr>
+	                        <th>Date</th>
+	                        <th>Race</th>
+	                        <th>Player</th>
+	                        <th>Map</th>
+	                        <th>Link</th>
+	                        <th>Replay</th>
+	                        <th>Download</th>
+	                      </tr>
+	                      %s
+	                    </table>
+	                </body>
+	            </html>
+	        `, repbody)
 		}
 
-		link := reqUrl.Query().Get("link")
-		log.Printf("link: %s\n", link)
-
-		onlydownload := reqUrl.Query().Get("onlydownload")
-		log.Printf("onlydownload: %s\n", onlydownload)
-
-		err = getRep(link, onlydownload)
-		var errMsg string
-		if err != nil {
-			errMsg = "ERROR: " + err.Error()
-		} else {
-			errMsg = "SUCCESS"
+		switch r.FormValue("action") {
+		case "replay":
+			// go doReplay(r.FormValue("link"))
+			go getRep(r.FormValue("link"), true)
+		case "download":
+			// go doDownload(r.FormValue("link"))
+			go getRep(r.FormValue("link"), false)
 		}
-		// TODO
-		fmt.Fprintf(w, "%s", errMsg)
+
+		w.Write([]byte(response))
 	})
 
 	go startBrowser()
@@ -125,7 +96,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(httpAddr, nil))
 }
 
-func getRep(link string, onlydownload string) error {
+func getRep(link string, replay bool) error {
 	resp, err := http.Get(link)
 	if err != nil {
 		return err
@@ -239,7 +210,7 @@ func getRep(link string, onlydownload string) error {
 		log.Println("map file already exists")
 	}
 
-	if onlydownload == "false" {
+	if replay {
 		startReplay(replayName)
 	}
 
