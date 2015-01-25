@@ -44,11 +44,12 @@ type repentry struct {
 	Link   string
 }
 
-const war3Path = "D:/GAME/Warcraft III/"
+// const war3Path = "D:/GAME/Warcraft III/"
+const war3Path = "./"
 const war3Exe = "Frozen Throne.exe"
 const replaySavePath = "replay/"
 
-const httpAddr = "127.0.0.1:8080"
+const httpAddr = "127.0.0.1:28080"
 const httpListPattern = "/list"
 const httpReplayPattern = "/replay"
 
@@ -85,6 +86,7 @@ func main() {
                         <th>Map</th>
                         <th>Link</th>
                         <th>Replay</th>
+                        <th>Download</th>
                       </tr>
                       %s
                     </table>
