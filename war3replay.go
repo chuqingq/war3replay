@@ -117,12 +117,17 @@ func getRep(link string, replay bool) error {
 	replayPath := reFindAndReplaceAll(content,
 		`<span id="ctl00_Content_labDown" class="download"><a href="(.*)">Download REP</a></span>`,
 		"$1")
-	replayPath, err = url.QueryUnescape(replayPath)
+	//replayPath, err = url.QueryEscape(replayPath)
+	//if err != nil {
+	//	return err
+	//}
+	log.Printf("replayPath=%s\n", replayPath)
+	//replayName := reReplaceAll(replayPath, `/Download.aspx\?ReplayID=.*&File=/ReplayFile/.*/(.*)`, "$1")
+	replayName := reReplaceAll(replayPath, `/Download.aspx\?ReplayID=.*&File=%2fReplayFile%2f.*%2f(.*)`, "$1")
+	replayName, err = url.QueryUnescape(replayName)
 	if err != nil {
 		return err
 	}
-	log.Printf("replayPath=%s\n", replayPath)
-	replayName := reReplaceAll(replayPath, `/Download.aspx\?ReplayID=.*&File=/ReplayFile/.*/(.*)`, "$1")
 	log.Printf("replayName=%s\n", replayName)
 
 	// 如果replayName不存在，再下载
