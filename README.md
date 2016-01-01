@@ -1,12 +1,23 @@
-# 在线一键看war3录像
+# watch war3 replay
 
-### 使用方法：
+## compile
 
-* 下载war3replay.exe到Warcraft III目录下
-* 执行war3replay.exe，会自动打开浏览器
+```
+go build
+```
 
-### 然后点击相应的功能：
+## install
 
-* 点击replay：会自动下载replay文件和相应的地图，并打开war3，“一键”在线看录像
-* 点击download：只自动下载replay文件和相应的地图，不打开war3
-* 点击link：链接到 http://w3g.replays.net ，可以查看评论等详情
+copy `war3replay.exe` to `Warcraft III` folder.
+
+## usage
+
+* start war3replay.exe, which will start browser
+* click download: it will download the replay file and the map
+* click replay: it will download the replay file and the map, and then open war3 to replay;
+* click link: the browser will redirect to http://w3g.replays.net, you can review the details
+
+## TODO
+
+* save all maps
+* support `http://w3g.replays.net` next pages

@@ -35,66 +35,84 @@ const httpReplayPattern = "/replay"
 var response string
 
 func main() {
-	http.HandleFunc(httpListPattern, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("== list")
-
-		if response == "" {
-			replist := getReplays()
-
-			// 组装页面内容
-			repbody := ""
-			for _, rep := range replist {
-				repbody += fmt.Sprintf(`
-                <tr>
-                    <td>%s</td>
-                    <td>%s</td>
-                    <td>%s</td>
-                    <td>%s</td>
-                    <td><a href="%s" target="_blank">link</a></td>
-                    <td><a href="/list?action=replay&link=%s">replay</a></td></td>
-                    <td><a href="/list?action=download&link=%s">download</a></td></td>
-                </tr>
-            `, rep.Date, rep.Race, rep.Player, rep.Map, rep.Link, rep.Link, rep.Link)
-			}
-			// 展示
-			response = fmt.Sprintf(`
-	            <html>
-	                <head></head>
-	                <body>
-	                    <table border="1">
-	                      <tr>
-	                        <th>Date</th>
-	                        <th>Race</th>
-	                        <th>Player</th>
-	                        <th>Map</th>
-	                        <th>Link</th>
-	                        <th>Replay</th>
-	                        <th>Download</th>
-	                      </tr>
-	                      %s
-	                    </table>
-	                </body>
-	            </html>
-	        `, repbody)
-		}
-
-		switch r.FormValue("action") {
-		case "replay":
-			// go doReplay(r.FormValue("link"))
-			go getRep(r.FormValue("link"), true)
-		case "download":
-			// go doDownload(r.FormValue("link"))
-			go getRep(r.FormValue("link"), false)
-		}
-
-		w.Write([]byte(response))
-	})
+	http.HandleFunc("/list", listHandler)
+	http.HandleFunc("/download", downloadHandler)
+	http.HandleFunc("/replay", replayHandler)
 
 	go startBrowser()
 
 	log.Printf("listen at %s ...\n", httpAddr+httpListPattern)
 	log.Fatal(http.ListenAndServe(httpAddr, nil))
 }
+
+// 展示页面
+func listHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("== list")
+
+	if response == "" {
+		replist := getReplays()
+
+		// 组装页面内容
+		repbody := ""
+		for _, rep := range replist {
+			repbody += fmt.Sprintf(`
+	            <tr>
+	                <td>%s</td>
+	                <td>%s</td>
+	                <td>%s</td>
+	                <td>%s</td>
+	                <td><a href="%s" target="_blank">link</a></td>
+	                <td><a href="javascript:action('replay', '%s');">replay</a></td></td>
+	                <td><a href="javascript:action('download', '%s');">download</a></td></td>
+	            </tr>
+            `, rep.Date, rep.Race, rep.Player, rep.Map, rep.Link, rep.Link, rep.Link)
+		}
+		// <td><a href="/list?action=replay&link=%s">replay</a></td></td>
+		// 展示
+		response = fmt.Sprintf(`
+            <html>
+                <head>
+                    <script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
+                    <script>
+                        function action(action, link) {
+                            $.ajax({
+                                url: "/"+action+"?link="+link
+                            });
+                        }
+                    </script>
+                </head>
+                <body>
+                    <table border="1">
+                      <tr>
+                        <th>Date</th>
+                        <th>Race</th>
+                        <th>Player</th>
+                        <th>Map</th>
+                        <th>Link</th>
+                        <th>Replay</th>
+                        <th>Download</th>
+                      </tr>
+                      %s
+                    </table>
+                </body>
+            </html>
+        `, repbody)
+	}
+
+	w.Write([]byte(response))
+}
+
+// 下载replay
+func downloadHandler(w http.ResponseWriter, r *http.Request) {
+	getRep(r.FormValue("link"), false)
+}
+
+// 播放replay
+func replayHandler(w http.ResponseWriter, r *http.Request) {
+	getRep(r.FormValue("link"), true)
+}
+
+//-------------------------------------------------------------------------------
 
 func getRep(link string, replay bool) error {
 	resp, err := http.Get(link)
@@ -119,7 +137,7 @@ func getRep(link string, replay bool) error {
 		"$1")
 	//replayPath, err = url.QueryEscape(replayPath)
 	//if err != nil {
-	//	return err
+	//    return err
 	//}
 	log.Printf("replayPath=%s\n", replayPath)
 	//replayName := reReplaceAll(replayPath, `/Download.aspx\?ReplayID=.*&File=/ReplayFile/.*/(.*)`, "$1")
@@ -150,6 +168,7 @@ func getRep(link string, replay bool) error {
 		log.Printf("write replay file: %v\n", replaySaveAbsPath)
 		err = ioutil.WriteFile(replaySaveAbsPath, buf, os.ModePerm)
 		if err != nil {
+			log.Printf("write replay file error: %v\n", err)
 			return err
 		}
 	} else {
