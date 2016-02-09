@@ -39,6 +39,9 @@ func main() {
 	http.HandleFunc("/download", downloadHandler)
 	http.HandleFunc("/replay", replayHandler)
 
+	http.HandleFunc("/locallist", localListHandler)
+	http.HandleFunc("/localreplay", localReplayHandler)
+
 	go startBrowser()
 
 	log.Printf("listen at %s ...\n", httpAddr+httpListPattern)
@@ -110,6 +113,72 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 // 播放replay
 func replayHandler(w http.ResponseWriter, r *http.Request) {
 	getRep(r.FormValue("link"), true)
+}
+
+// 列出本地replay
+func localListHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("== locallist")
+
+	replist := getLocalReplays()
+
+	// 组装页面内容
+	repbody := ""
+	for _, rep := range replist {
+		repbody += fmt.Sprintf(`
+	            <tr>
+	                <td>%s</td>
+	                <td><a href="javascript:action('localreplay', '%s');">replay</a></td></td>
+	            </tr>
+            `, rep, rep)
+	}
+	// <td><a href="/list?action=replay&link=%s">replay</a></td></td>
+	// 展示
+	response = fmt.Sprintf(`
+            <html>
+                <head>
+                    <script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
+                    <script>
+                        function action(action, rep) {
+                            $.ajax({
+                                url: "/"+action+"?rep="+rep
+                            });
+                        }
+                    </script>
+                </head>
+                <body>
+                    <table border="1">
+                      <tr>
+                        <th>file</th>
+                        <th>Replay</th>
+                      </tr>
+                      %s
+                    </table>
+                </body>
+            </html>
+    `, repbody)
+
+	w.Write([]byte(response))
+}
+
+func localReplayHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("== localReplayHandler: %v\n", r.FormValue("rep"))
+	startReplay(r.FormValue("rep"))
+}
+
+func getLocalReplays() []string {
+	fileInfos, err := ioutil.ReadDir(replaySavePath)
+	if err != nil {
+		log.Printf("ReadDir error: %v\n", err)
+		return nil
+	}
+
+	res := make([]string, 0)
+	for _, file := range fileInfos {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".w3g") {
+			res = append(res, file.Name())
+		}
+	}
+	return res
 }
 
 //-------------------------------------------------------------------------------

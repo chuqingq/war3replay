@@ -19,5 +19,6 @@ copy `war3replay.exe` to `Warcraft III` folder.
 
 ## TODO
 
+* show local replays, and analyze those information: `/locallist`
 * save all maps
 * support `http://w3g.replays.net` next pages
