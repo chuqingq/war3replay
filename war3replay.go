@@ -4,7 +4,7 @@ package main
 // go build -ldflags "-s -w -H windowsgui"
 
 import (
-	"fmt"
+	"html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -47,75 +47,37 @@ func main() {
 	log.Fatal(http.ListenAndServe(httpAddr, nil))
 }
 
-// 展示页面
+// 列出http://w3g.replays.net上的replays
 func listHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("== list")
 
 	replist := getReplays()
-
-	// 组装页面内容
-	repbody := ""
-	for _, rep := range replist {
-		repbody += fmt.Sprintf(`
-	            <tr>
-	                <td>%s</td>
-	                <td>%s</td>
-	                <td>%s</td>
-	                <td>%s</td>
-	                <td><a href="%s" target="_blank">L</a></td>
-	                <td><a href="javascript:action('replay', '%s');">R</a></td></td>
-	                <td><a href="javascript:action('download', '%s');">D</a></td></td>
-	            </tr>
-            `, rep.Date, rep.Race, rep.Player, rep.Map, rep.Link, rep.Link, rep.Link)
+	t, err := template.New("listTpl").Parse(listTpl)
+	if err != nil {
+		log.Printf("template error: %v\n", err)
+		return
 	}
-	// <td><a href="/list?action=replay&link=%s">replay</a></td></td>
-	// 展示
-	response := fmt.Sprintf(`
-            <html>
-                <head>
-                    <script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
-                    <style type="text/css">
-                        table{width: 100%%;}
-                        table,th,td{font-family: Consolas; font-size: 12px; border-collapse: collapse; border: #BBBBBB solid  1px;}
-                        a{font-family: Consolas; font-size: 12px; }
-                    </style>
-                    <script>
-                        function action(action, link) {
-                            $.ajax({
-                                url: "/"+action+"?link="+link
-                            });
-                        }
-                    </script>
-                </head>
-                <body>
-                	<a href="/locallist" target="_blank">local replays</a>
-                    <table>
-                      <thead><tr>
-                        <th>Date</th>
-                        <th>Race</th>
-                        <th>Player</th>
-                        <th>Map</th>
-                        <th></th>
-                        <th></th>
-                        <th></th>
-                      </tr></thead>
-                      <tbody>%s</tbody>
-                    </table>
-                </body>
-            </html>
-        `, repbody)
 
-	w.Write([]byte(response))
+	err = t.Execute(w, replist)
+	if err != nil {
+		log.Printf("t.Execute error: %v\n", err)
+		return
+	}
 }
 
-// 下载replay
+// 下载link指向的replay
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
-	getRep(r.FormValue("link"), false)
+	getRep(r.FormValue("link"))
 }
 
-// 播放replay
+// 下载并播放link指向的replay
 func replayHandler(w http.ResponseWriter, r *http.Request) {
-	getRep(r.FormValue("link"), true)
+	name, err := getRep(r.FormValue("link"))
+	if err != nil {
+		log.Printf("getRep error: %v\n", err)
+		return
+	}
+	startReplay(name)
 }
 
 // 列出本地replay
@@ -123,55 +85,26 @@ func localListHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("== locallist")
 
 	replist := getLocalReplays()
-
-	// 组装页面内容
-	repbody := ""
-	for _, rep := range replist {
-		repbody += fmt.Sprintf(`
-	            <tr>
-	                <td>%s</td>
-	                <td><a href="javascript:action('localreplay', '%s');">R</a></td></td>
-	            </tr>
-            `, rep, rep)
+	t, err := template.New("localListTpl").Parse(localListTpl)
+	if err != nil {
+		log.Printf("template error: %v\n", err)
+		return
 	}
-	// <td><a href="/list?action=replay&link=%s">replay</a></td></td>
-	// 展示
-	response := fmt.Sprintf(`
-            <html>
-                <head>
-                    <script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
-                    <style type="text/css">
-                        table{width: 100%%;}
-                        table,th,td{font-family: Consolas; font-size: 12px; border-collapse: collapse; border: #BBBBBB solid  1px;}
-                    </style>
-                    <script>
-                        function action(action, rep) {
-                            $.ajax({
-                                url: "/"+action+"?rep="+rep
-                            });
-                        }
-                    </script>
-                </head>
-                <body>
-                    <table border="1">
-                      <tr>
-                        <th>LocalFile</th>
-                        <th></th>
-                      </tr>
-                      %s
-                    </table>
-                </body>
-            </html>
-    `, repbody)
 
-	w.Write([]byte(response))
+	err = t.Execute(w, replist)
+	if err != nil {
+		log.Printf("t.Execute error: %v\n", err)
+		return
+	}
 }
 
+// 播放本地的replay
 func localReplayHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("== localReplayHandler: %v\n", r.FormValue("rep"))
 	startReplay(r.FormValue("rep"))
 }
 
+// 获取本地的replays，只取名字
 func getLocalReplays() []string {
 	fileInfos, err := ioutil.ReadDir(replaySavePath)
 	if err != nil {
@@ -190,17 +123,18 @@ func getLocalReplays() []string {
 
 //-------------------------------------------------------------------------------
 
-func getRep(link string, replay bool) error {
+// 根据link下载replay和地图
+func getRep(link string) (string, error) {
 	resp, err := http.Get(link)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	log.Println("reading repinfo body...")
 	buf, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	log.Println("reading repinfo body ok")
 
@@ -220,7 +154,7 @@ func getRep(link string, replay bool) error {
 	replayName := reReplaceAll(replayPath, `/Download.aspx\?ReplayID=.*&File=%2fReplayFile%2f.*%2f(.*)`, "$1")
 	replayName, err = url.QueryUnescape(replayName)
 	if err != nil {
-		return err
+		return "", err
 	}
 	log.Printf("replayName=%s\n", replayName)
 
@@ -230,14 +164,14 @@ func getRep(link string, replay bool) error {
 	if err != nil && !os.IsExist(err) {
 		respRep, err := http.Get("http://w3g.replays.net" + replayPath)
 		if err != nil {
-			return err
+			return "", err
 		}
 		defer respRep.Body.Close()
 
 		log.Println("reading rep body...")
 		buf, err = ioutil.ReadAll(respRep.Body)
 		if err != nil {
-			return err
+			return "", err
 		}
 		log.Println("reading rep body...")
 
@@ -245,7 +179,7 @@ func getRep(link string, replay bool) error {
 		err = ioutil.WriteFile(replaySaveAbsPath, buf, os.ModePerm)
 		if err != nil {
 			log.Printf("write replay file error: %v\n", err)
-			return err
+			return "", err
 		}
 	} else {
 		log.Println("replay file already exists")
@@ -279,7 +213,7 @@ func getRep(link string, replay bool) error {
 
 	respMap, err := http.Get(mapPathAbs)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer respMap.Body.Close()
 
@@ -288,7 +222,7 @@ func getRep(link string, replay bool) error {
 		log.Printf("map file different: local=%v, remote=%v\n", localMapSize, respMap.ContentLength)
 		buf, err = ioutil.ReadAll(respMap.Body)
 		if err != nil {
-			return err
+			return "", err
 		}
 		log.Println("reading map body ok")
 
@@ -298,25 +232,22 @@ func getRep(link string, replay bool) error {
 		log.Printf("mapDir2=%s\n", mapDir)
 		err = os.MkdirAll(mapDir, 0777)
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		log.Printf("write map file: %v\n", mapAbsPath)
 		err = ioutil.WriteFile(mapAbsPath, buf, os.ModePerm)
 		if err != nil {
-			return err
+			return "", err
 		}
 	} else {
 		log.Println("map file already exists")
 	}
 
-	if replay {
-		startReplay(replayName)
-	}
-
-	return nil
+	return replayName, nil
 }
 
+// 读取http://w3g.replays.net上的replays列表
 func getReplays() []*repentry {
 	// 获取replay页面内容
 	resp, err := http.Get("http://w3g.replays.net")
@@ -353,7 +284,7 @@ func getReplays() []*repentry {
 	res := *content2
 
 	res = reReplaceAll(res, `<li class="c_r"><a href=".*">(.*)</a></li>\r\n`, "$1|")
-	res = reReplaceAll(res, `<li class="c_p"><a href="(.*)" target="_blank">(.*)</li>\r\n`, "$2|$1|")
+	res = reReplaceAll(res, `<li class="c_p"><a href="(.*)" target="_blank">(.*)</a>`, "$2|$1|")
 	res = reReplaceAll(res, `<li class="c_m">(.*)</li>\r\n`, "$1|")
 	res = reReplaceAll(res, `<li class="c_t">(.*)</li>\r\n`, "$1\n")
 	res = reReplaceAll(res, `<(.*)>\r\n`, "")
@@ -378,6 +309,7 @@ func getReplays() []*repentry {
 	return replist
 }
 
+// 启动浏览器打开主页
 func startBrowser() {
 	time.Sleep(2 * time.Second)
 	cmd := exec.Command("cmd", "/c", "start http://"+httpAddr+httpListPattern)
@@ -387,6 +319,7 @@ func startBrowser() {
 	}
 }
 
+// 启动播放一个remplay，传入replay的文件名，不包含replay/路径
 func startReplay(replayName string) {
 	log.Printf("startReplay: %s\n", replayName)
 	cmd := exec.Command(war3Path+war3Exe, "-loadfile", war3Path+replaySavePath+replayName)
@@ -408,3 +341,83 @@ func reReplaceAll(str string, reStr string, replace string) string {
 	re := regexp.MustCompile(reStr)
 	return re.ReplaceAllString(str, replace)
 }
+
+// 模板
+
+const listTpl string = `
+<html>
+    <head>
+        <script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
+        <style type="text/css">
+            table{width: 80%;}
+            table,th,td{font-family: Consolas; font-size: 12px; border-collapse: collapse; border: #BBBBBB solid  1px;}
+            a{font-family: Consolas; font-size: 12px; }
+        </style>
+        <script>
+            function action(action, link) {
+                $.ajax({url: "/"+action+"?link="+link});
+            }
+        </script>
+    </head>
+    <body>
+    	<a href="/locallist" target="_blank">local replays</a>
+        <table>
+          <thead><tr>
+            <th>Date</th>
+            <th>Race</th>
+            <th>Player</th>
+            <th>Map</th>
+            <th></th>
+            <th></th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+          	{{range .}}
+            <tr>
+                <td>{{.Date}}</td>
+                <td>{{.Race}}</td>
+                <td>{{.Player}}</td>
+                <td>{{.Map}}</td>
+                <td><a href="{{.Link}}" target="_blank">L</a></td>
+                <td><a href="javascript:action('replay', '{{.Link}}');">R</a></td></td>
+                <td><a href="javascript:action('download', '{{.Link}}');">D</a></td></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+    </body>
+</html>
+`
+
+const localListTpl string = `
+<html>
+    <head>
+        <script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
+        <style type="text/css">
+            table{width: 80%;}
+            table,th,td{font-family: Consolas; font-size: 12px; border-collapse: collapse; border: #BBBBBB solid  1px;}
+        </style>
+        <script>
+            function action(action, rep) {
+                $.ajax({
+                    url: "/"+action+"?rep="+rep
+                });
+            }
+        </script>
+    </head>
+    <body>
+        <table border="1">
+          <tr>
+            <th>LocalFile</th>
+            <th></th>
+          </tr>
+          {{range .}}
+  	      <tr>
+            <td>{{.}}</td>
+            <td><a href="javascript:action('localreplay', '{{.}}');">R</a></td></td>
+          </tr>
+          {{end}}
+        </table>
+    </body>
+</html>
+`
