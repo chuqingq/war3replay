@@ -1,6 +1,7 @@
 package main
 
 // 在线一键看war3录像
+// go build -ldflags "-s -w -H windowsgui"
 
 import (
 	"fmt"
@@ -32,8 +33,6 @@ const httpAddr = "127.0.0.1:28080"
 const httpListPattern = "/list"
 const httpReplayPattern = "/replay"
 
-var response string
-
 func main() {
 	http.HandleFunc("/list", listHandler)
 	http.HandleFunc("/download", downloadHandler)
@@ -52,30 +51,34 @@ func main() {
 func listHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("== list")
 
-	if response == "" {
-		replist := getReplays()
+	replist := getReplays()
 
-		// 组装页面内容
-		repbody := ""
-		for _, rep := range replist {
-			repbody += fmt.Sprintf(`
+	// 组装页面内容
+	repbody := ""
+	for _, rep := range replist {
+		repbody += fmt.Sprintf(`
 	            <tr>
 	                <td>%s</td>
 	                <td>%s</td>
 	                <td>%s</td>
 	                <td>%s</td>
-	                <td><a href="%s" target="_blank">link</a></td>
-	                <td><a href="javascript:action('replay', '%s');">replay</a></td></td>
-	                <td><a href="javascript:action('download', '%s');">download</a></td></td>
+	                <td><a href="%s" target="_blank">L</a></td>
+	                <td><a href="javascript:action('replay', '%s');">R</a></td></td>
+	                <td><a href="javascript:action('download', '%s');">D</a></td></td>
 	            </tr>
             `, rep.Date, rep.Race, rep.Player, rep.Map, rep.Link, rep.Link, rep.Link)
-		}
-		// <td><a href="/list?action=replay&link=%s">replay</a></td></td>
-		// 展示
-		response = fmt.Sprintf(`
+	}
+	// <td><a href="/list?action=replay&link=%s">replay</a></td></td>
+	// 展示
+	response := fmt.Sprintf(`
             <html>
                 <head>
                     <script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
+                    <style type="text/css">
+                        table{width: 100%%;}
+                        table,th,td{font-family: Consolas; font-size: 12px; border-collapse: collapse; border: #BBBBBB solid  1px;}
+                        a{font-family: Consolas; font-size: 12px; }
+                    </style>
                     <script>
                         function action(action, link) {
                             $.ajax({
@@ -85,22 +88,22 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
                     </script>
                 </head>
                 <body>
-                    <table border="1">
-                      <tr>
+                	<a href="/locallist" target="_blank">local replays</a>
+                    <table>
+                      <thead><tr>
                         <th>Date</th>
                         <th>Race</th>
                         <th>Player</th>
                         <th>Map</th>
-                        <th>Link</th>
-                        <th>Replay</th>
-                        <th>Download</th>
-                      </tr>
-                      %s
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                      </tr></thead>
+                      <tbody>%s</tbody>
                     </table>
                 </body>
             </html>
         `, repbody)
-	}
 
 	w.Write([]byte(response))
 }
@@ -127,16 +130,20 @@ func localListHandler(w http.ResponseWriter, r *http.Request) {
 		repbody += fmt.Sprintf(`
 	            <tr>
 	                <td>%s</td>
-	                <td><a href="javascript:action('localreplay', '%s');">replay</a></td></td>
+	                <td><a href="javascript:action('localreplay', '%s');">R</a></td></td>
 	            </tr>
             `, rep, rep)
 	}
 	// <td><a href="/list?action=replay&link=%s">replay</a></td></td>
 	// 展示
-	response = fmt.Sprintf(`
+	response := fmt.Sprintf(`
             <html>
                 <head>
                     <script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
+                    <style type="text/css">
+                        table{width: 100%%;}
+                        table,th,td{font-family: Consolas; font-size: 12px; border-collapse: collapse; border: #BBBBBB solid  1px;}
+                    </style>
                     <script>
                         function action(action, rep) {
                             $.ajax({
@@ -148,8 +155,8 @@ func localListHandler(w http.ResponseWriter, r *http.Request) {
                 <body>
                     <table border="1">
                       <tr>
-                        <th>file</th>
-                        <th>Replay</th>
+                        <th>LocalFile</th>
+                        <th></th>
                       </tr>
                       %s
                     </table>
@@ -335,6 +342,9 @@ func getReplays() []*repentry {
 	const right = `<span id="ctl00_Content_labPage" class="cutpage">`
 	var content2 *string
 	strArr := strings.Split(content, left)
+	if len(strArr) <= 1 {
+		return make([]*repentry, 0)
+	}
 
 	content2 = &strArr[1]
 	strArr2 := strings.Split(*content2, right)
